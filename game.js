@@ -1,0 +1,1052 @@
+import { createMario, marioShoot, marioStopFiring, updateMarioHealthBar } from './mario.js'
+//import * as floaters from './floaters.js'
+//import * as walkables from './walkables.js'
+import * as collision from './collision.js'
+import { stage1, stageControllerTicker, eventQueue, stage2, stage3, removeAllEvents, stopAllSpawners } from './stagecontroller.js'
+import * as utils from "./utils.js"
+import { createBomb } from './explosion.js'
+import { AudioManager, xToPan } from './audio.js'
+import { Tiles } from './Tiles.js'
+import { stage1Map, renderTileMap, stage2Map, stage3Map } from './tilesMap.js'
+import { cinematicTicker } from './cinematics.js'
+
+//import * as lasers from './lasers'
+//import * as utils from './utils.js'
+const backImage = new Image();
+// backImage.src = "./assets/backgrounds/background.png";
+const TILE_SIZE = 32;
+const tiles = new Tiles();
+const tileMap = []
+const mainMenu = document.getElementById('main-menu');
+const pauseMenu = document.getElementById('pause-menu');
+const scoreElement = document.getElementById('score');
+const livesElement = document.getElementById('lives');
+const powerupText = document.getElementById('powerup-text');
+const gameOverMenu = document.getElementById('game-over-menu');
+const helpMenu = document.getElementById('help-menu');
+const mainHelpButton = document.getElementById('main-help-button');
+const pauseHelpButton = document.getElementById('pause-help-button');
+const backFromHelpButton = document.getElementById('back-from-help-button');
+const timeCounterElement = document.getElementById('time-counter');
+
+const playButton = document.getElementById('play-button');
+const resumeButton = document.getElementById('resume-button');
+const restartButton = document.getElementById('restart-button');
+//const backToMenuButton = document.getElementById('back-to-menu-button');
+const leaderboardButton = document.getElementById('leaderboard-button');
+
+const finalScoreElement = document.getElementById('final-score');
+const finalTimeElement = document.getElementById('final-time');
+const playerNameInput = document.getElementById('player-name-input');
+const submitScoreButton = document.getElementById('submit-score-button');
+const playerRankInfo = document.getElementById('player-rank-info');
+const leaderboardContainer = document.getElementById('leaderboard-container');
+const leaderboardBody = document.getElementById('leaderboard-body');
+const paginationInfo = document.getElementById('pagination-info');
+const prevButton = document.getElementById('leaderboard-prev-button');
+const nextButton = document.getElementById('leaderboard-next-button');
+
+const scoreTallyScreen = document.getElementById('score-tally-screen');
+const tallyBaseScore = document.getElementById('tally-base-score');
+const tallyLivesBonus = document.getElementById('tally-lives-bonus');
+const tallyTimeBonus = document.getElementById('tally-time-bonus');
+const tallyFinalScore = document.getElementById('tally-final-score');
+
+const leaderboardMenu = document.getElementById('leaderboard-menu');
+const backFromLeaderboardButton = document.getElementById('back-from-leaderboard-button');
+
+let endGame = false;
+const showDebug = true
+
+const leaderboard = {
+    currentPage: 1,
+    totalPages: 1,
+    async fetchAndDisplay(page) {
+        //show loading message
+        leaderboardBody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+        leaderboardContainer.classList.remove('hidden');
+        try {
+            const response = await fetch(`http://localhost:8000/scores?page=${page}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+            const data = await response.json();
+            //clear loading message
+            leaderboardBody.innerHTML = '';
+
+            if (!data.scores || data.scores.length === 0) {
+                leaderboardBody.innerHTML = '<tr><td colspan="4">No scores yet!</td></tr>';
+            } else {
+                data.scores.forEach(score => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${score.rank}</td>
+                        <td>${score.name}</td>
+                        <td>${score.score}</td>
+                        <td>${score.time}</td>
+                    `;
+                    leaderboardBody.appendChild(row);
+                });
+            }
+            this.currentPage = data.currentPage;
+            this.totalPages = data.totalPages;
+
+            paginationInfo.textContent = `Page ${this.currentPage} / ${this.totalPages}`;
+            prevButton.disabled = (this.currentPage <= 1);
+            nextButton.disabled = (this.currentPage >= this.totalPages);
+
+        } catch (error) {
+            console.error('Failed to fetch leaderboard:', error);
+            leaderboardBody.innerHTML = '<tr><td colspan="4">Error loading scores.</td></tr>';
+        }
+    },
+
+    addPaginationListeners() {
+        prevButton.addEventListener('click', () => {
+            if (this.currentPage > 1) {
+                this.fetchAndDisplay(this.currentPage - 1);
+            }
+        });
+        nextButton.addEventListener('click', () => {
+            if (this.currentPage < this.totalPages) {
+                this.fetchAndDisplay(this.currentPage + 1);
+            }
+        });
+    }
+};
+
+leaderboard.addPaginationListeners();
+
+
+
+let lastTime = 0;
+
+export const audio = {
+    music: true,
+    sounds: true,
+    musicVolume: 0.5,
+    soundsVolume: 0.25,
+    manager: new AudioManager({
+        bomb: "./assets/audio/bomb.wav",
+        bubble: "./assets/audio/bubble.wav",
+        catching_sandwich: "./assets/audio/catching_sandwich.wav",
+        cicada_hit: "./assets/audio/cicada_hit.wav",
+        destroy_fly: "./assets/audio/destroy_fly.wav",
+        mario_bullet_hit: "./assets/audio/bullet_hit.wav",
+        game_over: "./assets/audio/game_over.wav",
+        health_short: "./assets/audio/health_short.wav",
+        health: "./assets/audio/health.wav",
+        lazer_short: "./assets/audio/lazer_short.wav",
+        lazer: "./assets/audio/lazer.wav",
+        lose_life: "./assets/audio/lose_life.wav",
+        swarm: "./assets/audio/swarm.wav",
+        tick: "./assets/audio/time_tick.wav",
+        turtle_hit: "./assets/audio/turtle_hit.wav",
+        vending_rising: "./assets/audio/vending_rising.wav",
+        win: "./assets/audio/win.mp3",
+
+        // vocal
+        mario_death: "./assets/audio/mario_death.wav",
+        mario_hit1: "./assets/audio/mario_hit1.wav",
+        mario_hit2: "./assets/audio/mario_hit2.wav",
+        mario_hit3: "./assets/audio/mario_hit3.wav",
+        mario_hit4_rare: "./assets/audio/mario_hit4_rare.wav",
+        mario_jump1: "./assets/audio/mario_jump1.wav",
+        mario_jump2: "./assets/audio/mario_jump2.wav",
+        mario_jump3: "./assets/audio/mario_jump3.wav",
+
+        // narration
+        nar1: "./assets/audio/nar1.ogg",
+        nar2: "./assets/audio/nar2.ogg",
+        nar3: "./assets/audio/nar3.ogg",
+        nar4: "./assets/audio/nar4.ogg",
+        nar5: "./assets/audio/nar5.ogg",
+        nar6: "./assets/audio/nar6.ogg",
+        nar7: "./assets/audio/nar7.ogg",
+        nar8: "./assets/audio/nar8.ogg",
+        nar9: "./assets/audio/nar9.ogg",
+        nar10: "./assets/audio/nar10.mp3",
+        nar11: "./assets/audio/nar11.ogg",
+        nar12: "./assets/audio/shrooms.ogg",
+        // nar12: "./assets/audio/nar12.ogg",
+    }, 4),
+    tracks: [
+        { url: "./assets/audio/mario.mp3", overlapDuration: 7.742 },
+        { url: "./assets/audio/intro.mp3", overlapDuration: 9.474 },
+    ],
+    initialized: false,
+    xToPan: xToPan,
+    setUp: async function () {
+        this.manager.resume();
+        await this.manager.loadSamples();
+        for (let i = 0; i < this.tracks.length; i++) {
+            await this.manager.getOrLoadMusicBuffer(this.tracks[i].url);
+        }
+    }
+}
+
+//master
+export let gameState = {
+    currentState: "mainMenu"
+}
+
+
+export const queueFree = []
+export const gameArea = document.getElementById('game-area')
+
+
+
+//adding our created entities to allEntities if they are not static
+
+
+
+
+
+
+
+export function updateMenuVisibility() {
+    //hide all menus by default
+    mainMenu.classList.add('hidden');
+    pauseMenu.classList.add('hidden');
+    gameOverMenu.classList.add('hidden');
+    helpMenu.classList.add('hidden');
+    leaderboardMenu.classList.add('hidden');
+    scoreTallyScreen.classList.add('hidden');
+
+    if (gameState.currentState === 'mainMenu') {
+        mainMenu.classList.remove('hidden');
+    } else if (gameState.currentState === 'paused') {
+        pauseMenu.classList.remove('hidden')
+    } else if (gameState.currentState === 'gameOver') {
+        gameOverMenu.classList.remove('hidden');
+    } else if (gameState.currentState === 'help') {
+        helpMenu.classList.remove('hidden');
+    } else if (gameState.currentState === 'leaderboard') {
+        leaderboardMenu.classList.remove('hidden')
+    } else if (gameState.currentState === 'tally') {
+        scoreTallyScreen.classList.remove('hidden');
+    }
+}
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+
+export async function startScoreTally(won = false) {
+
+    gameState.currentState = 'tally';
+    updateMenuVisibility();
+    audio.manager.stopMusic();
+
+    tallyBaseScore.textContent = '?';
+    tallyLivesBonus.textContent = '?';
+    tallyTimeBonus.textContent = '?';
+    tallyFinalScore.textContent = '?';
+
+    const SCORE_PER_LIFE = 5000;
+    const MAX_TIME_BONUS = 13000;
+    const TIME_BONUS_THRESHOLD_SECONDS = 420 // Player gets max bonus if they finish in under 7 minutes
+
+    // Display the initial base score
+    tallyBaseScore.textContent = gameState.score;
+    tallyFinalScore.textContent = gameState.score;
+    await wait(1000); // Wait 1 second for dramatic effect
+
+    // Calculate and animate the Lives Bonus
+    const livesBonus = gameState.lives * SCORE_PER_LIFE;
+    if (livesBonus > 0) {
+        if (audio.sounds) audio.manager.playSample("tick", { gain: audio.soundsVolume });
+        tallyLivesBonus.textContent = `+ ${livesBonus} (${gameState.lives} x ${SCORE_PER_LIFE})`;
+        updateScore(livesBonus);
+        tallyFinalScore.textContent = gameState.score;
+        await wait(1000);
+    } else {
+        tallyLivesBonus.textContent = `+ 0`;
+    }
+
+    // Calculate and animate the Time Bonus
+    let timeBonus = 0;
+    const totalSeconds = Math.floor(gameState.gameTime / 1000);
+    if (totalSeconds < TIME_BONUS_THRESHOLD_SECONDS) {
+        if (audio.sounds) audio.manager.playSample("tick", { gain: audio.soundsVolume });
+        // The faster you finish, the closer the factor is to 1
+        const timeFactor = 1 - (totalSeconds / TIME_BONUS_THRESHOLD_SECONDS);
+        timeBonus = Math.floor(MAX_TIME_BONUS * timeFactor);
+
+        tallyTimeBonus.textContent = `+ ${timeBonus} (Speed Bonus!)`;
+        updateScore(timeBonus); // Add the bonus to the master score
+        tallyFinalScore.textContent = gameState.score;
+        await wait(1000);
+    } else {
+        tallyTimeBonus.textContent = `+ 0`;
+    }
+
+    // Final pause before proceeding to the game over / score submission screen
+    await wait(5000);
+    triggerGameOver(won);
+}
+
+function restartGame() {
+    audio.manager.stopMusic(); // reseting musicOffset if coming from pause
+    let soundsTemp = audio.sounds;
+    audio.sounds = false;
+
+    gameState.currentGameGen++;
+    // stopAllSpawners();
+    // removeAllEvents();
+
+    //resetting these so that these old references get checked by a possible old stageController function and then it closes
+    for (let group of gameState.allGroups) {
+        group.length = 0
+    }
+
+    // crement at every restart
+    for (let entity of gameState.allEntities) {
+        if (entity.countdownDiv) {
+            entity.countdownDiv.remove()
+            utils.destroyUnit(entity)
+        }
+        if (entity.dom) entity.dom.remove();
+        if (entity.body) entity.body.forEach(body => body.div.remove());
+    }
+    audio.sounds = soundsTemp;
+
+    playerNameInput.disabled = false;
+    submitScoreButton.disabled = false; // Re-enable the submit score button
+    submitScoreButton.textContent = 'Submit Score';
+    playerRankInfo.textContent = "";
+
+    // gameState = {}
+
+    // gameState.currentState = "running";
+    // gameState.mapLoaded = false;
+    startStorymode();
+
+    livesElement.textContent = `Lives: ${gameState.lives}`;
+    if (showDebug) {
+        timeCounterElement.textContent = `Time: ${utils.formatTime(gameState.gameTime)} drawFps: ${parseInt(drawfpsMeter)} simFps: ${parseInt(updatefpsMeter)} debug: allEntities:${gameState.allEntities.length}, debug-visuals:${document.getElementById('debug-visuals').childElementCount}  ${thing}`;
+    } else {
+        timeCounterElement.textContent = `Time: ${utils.formatTime(gameState.gameTime)}  ${thing}`;
+    }
+
+    scoreElement.textContent = `Score: ${gameState.score}`;
+
+
+
+    updateMenuVisibility();
+    console.log(gameState);
+}
+
+
+export function updateScore(points) {
+    gameState.score += points;
+    scoreElement.textContent = `Score: ${gameState.score}`;
+}
+
+export function triggerGameOver(won = false) {
+    //check so that it's not called multiple times
+    if (gameState.currentState === 'gameOver') {
+        return;
+    }
+
+
+    gameState.currentState = 'gameOver';
+    endGame = true;
+    finalScoreElement.textContent = gameState.score;
+    finalTimeElement.textContent = utils.formatTime(gameState.gameTime);
+    audio.manager.stopMusic();
+    if (audio.sounds) {
+        audio.manager.killSamples();
+        if (!won) {
+            audio.manager.playSample("mario_death", {
+                gain: audio.soundsVolume,
+                pan: audio.xToPan(gameState.mario.x, gameArea.offsetWidth),
+            })
+            setTimeout(() => {
+                audio.manager.playSample("game_over", { gain: audio.soundsVolume });
+            }, 1000);
+        } else {
+            audio.manager.playSample("win", { gain: audio.musicVolume });
+        }
+    }
+
+    updateMenuVisibility();
+}
+
+export function lifeLostFanfare() {
+    if (audio.sounds) {
+        audio.manager.playSample("lose_life", { gain: audio.soundsVolume });
+    }
+    livesElement.classList.add('life-lost-flash');
+    setTimeout(() => {
+        livesElement.classList.remove('life-lost-flash');
+    }, 600);
+}
+
+//keeps track of which buttons are currently held down
+export const keysPressed = {
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+    space: false,
+    autofire: false,
+    fire: false,
+    upgrade: false,
+    bomb: false,
+    esc: false,
+};
+
+//--- EVENT LISTENERS ----
+
+window.addEventListener("keydown", function (e) {
+    const keysToPrevent = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "];
+    if (keysToPrevent.includes(e.key)) {
+        e.preventDefault(); // Stops scrolling
+    }
+}, false);
+
+
+// Main menu buttons
+playButton.addEventListener('click', async () => {
+    if (!audio.initialized) {
+        await audio.setUp();
+        audio.initialized = true;
+        audio.playSampleDeb = utils.opDebounce(audio.manager.playSample.bind(audio.manager), 100, { leading: true });
+    }
+
+    if (endGame) {
+        restartGame()
+        endGame = false;
+    } else {
+
+        startStorymode()
+        updateMenuVisibility();
+    }
+});
+
+leaderboardButton.addEventListener('click', () => {
+    gameState.currentState = 'leaderboard';
+    updateMenuVisibility();
+
+    leaderboardMenu.insertBefore(leaderboardContainer, backFromLeaderboardButton);
+    leaderboard.fetchAndDisplay(1);
+});
+
+backFromLeaderboardButton.addEventListener('click', () => {
+    // move the leaderboard element back to the game over menu
+    //    so it's ready for the next time the player dies.
+    const restartBtn = gameOverMenu.querySelector('#restart-button');
+    gameOverMenu.insertBefore(leaderboardContainer, restartBtn);
+    leaderboardContainer.classList.add('hidden');
+
+    // 2. Change the game state back to the main menu.
+    gameState.currentState = 'mainMenu';
+    updateMenuVisibility();
+});
+
+resumeButton.addEventListener('click', () => {
+    if (audio.music) {
+        audio.manager.playMusicLoop(audio.tracks[0].url, audio.musicVolume, audio.tracks[0].overlapDuration);
+    } else {
+        audio.manager.stopMusic();
+    }
+
+
+    gameState.currentState = 'running';
+
+    updateTimestamp = Date.now() + 8.3333
+
+    updateMenuVisibility();
+});
+
+restartButton.addEventListener('click', () => {
+    restartGame();
+});
+
+mainHelpButton.addEventListener('click', showHelpMenu);
+pauseHelpButton.addEventListener('click', showHelpMenu);
+
+backFromHelpButton.addEventListener('click', () => {
+    // Go back to the screen we were on before
+    gameState.currentState = gameState.previousState;
+    updateMenuVisibility();
+});
+
+submitScoreButton.addEventListener('click', async () => {
+    const playerName = playerNameInput.value.trim();
+
+    if (!playerName) {
+        alert('Please enter your name')
+        return;
+    }
+
+    //disable the button to prevent multiple submissions
+    submitScoreButton.disabled = true;
+    submitScoreButton.textContent = 'Submitting...';
+
+    const scoreData = {
+        name: playerName,
+        score: Math.floor(gameState.score),
+        time_ms: Math.floor(gameState.gameTime),
+    };
+    console.log("Submitting this data:", scoreData);
+    try {
+        const response = await fetch('http://localhost:8000/scores', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(scoreData)
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            const percentile = result.percentile.toFixed(1);
+            playerRankInfo.textContent = `Congrats ${playerName}, you are in the top ${percentile}%, on position ${result.rank}.`;
+
+            submitScoreButton.textContent = 'Submitted!';
+            playerNameInput.disabled = true;
+            leaderboard.fetchAndDisplay(1);
+        } else {
+            // The server responded with an error
+            const errorText = await response.text();
+            alert(`Error submitting score:\n\nServer responded with status ${response.status}.\nMessage: "${errorText}"`);
+            submitScoreButton.disabled = false; // Re-enable the button
+            submitScoreButton.textContent = 'Submit Score';
+        }
+    } catch (error) {
+        // A network error occurred
+        console.error('API Error:', error);
+        alert(`Failed to submit score. Could not connect to the server.\n\nError: ${error.message}`);
+        submitScoreButton.disabled = false; // Re-enable the button
+        submitScoreButton.textContent = 'Submit Score';
+    }
+
+})
+
+document.querySelectorAll('#back-to-menu-button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const result = confirm("All progress will be lost are you sure");
+        if (result) {
+            endGame = true;
+            gameState.currentState = 'mainMenu';
+            updateMenuVisibility();
+        }
+    });
+});
+
+document.querySelectorAll('#restart-button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        restartGame();
+    });
+});
+
+
+
+const sliders = {
+    music: [
+        document.getElementById('music-slider-main'),
+        document.getElementById('music-slider-pause')
+    ],
+    sounds: [
+        document.getElementById('sounds-slider-main'),
+        document.getElementById('sounds-slider-pause')
+    ]
+};
+
+function syncSliders(changedSlider, type) {
+    const value = parseFloat(changedSlider.value);
+    if (type === 'music') {
+        audio.musicVolume = value;
+    } else {
+        audio.soundsVolume = value;
+    }
+    // Update the other slider to stay in sync
+    sliders[type].forEach(slider => {
+        if (slider !== changedSlider) slider.value = value;
+    });
+}
+
+sliders.music.forEach(slider => {
+    slider.addEventListener('input', () => syncSliders(slider, 'music'));
+});
+
+sliders.sounds.forEach(slider => {
+    slider.addEventListener('input', () => syncSliders(slider, 'sounds'));
+});
+
+function showHelpMenu() {
+    gameState.previousState = gameState.currentState; // IMPORTANT: Remember where we came from
+    gameState.currentState = 'help';
+    audio.manager.pauseMusic();
+    updateMenuVisibility();
+}
+
+const musicToggles = [
+    document.getElementById('music-toggle-main'),
+    document.getElementById('music-toggle-pause')
+];
+
+const soundsToggles = [
+    document.getElementById('sounds-toggle-main'),
+    document.getElementById('sounds-toggle-pause')
+];
+
+function syncToggles(changedToggle, group, setValue) {
+    const newValue = changedToggle.checked;
+    setValue(newValue);
+
+    group.forEach(toggle => {
+        if (toggle !== changedToggle) toggle.checked = newValue;
+    });
+}
+
+// Event listeners for Music
+musicToggles.forEach(toggle => {
+    toggle.addEventListener('input', () => {
+        syncToggles(toggle, musicToggles, val => audio.music = val);
+    });
+});
+
+// Event listeners for Sounds
+soundsToggles.forEach(toggle => {
+    toggle.addEventListener('input', () => {
+        syncToggles(toggle, soundsToggles, val => audio.sounds = val);
+    });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    sliders.music.forEach(slider => {
+        slider.value = audio.musicVolume;
+    });
+
+    sliders.sounds.forEach(slider => {
+        slider.value = audio.soundsVolume;
+    });
+});
+
+
+
+
+// Listen for key presses
+document.addEventListener('keydown', (event) => {
+    // if (gameState.currentState !== 'running' && event.key.toLowerCase() !== 'p') {
+    //     return;
+    // }
+
+    if (event.key.toLowerCase() === 'p' && (gameState.currentState === 'running' || gameState.currentState === 'paused')) {
+        if (gameState.currentState === 'running') {
+            gameState.currentState = 'paused';
+            marioStopFiring();
+            if (audio.music) audio.manager.pauseMusic();
+            if (audio.sounds) audio.manager.killSamples();
+
+        } else if (gameState.currentState === 'paused') {
+
+            gameState.currentState = 'running';
+            updateTimestamp = Date.now() + 8.3333
+
+            if (audio.music) {
+                audio.manager.playMusicLoop(audio.tracks[0].url, audio.musicVolume, audio.tracks[0].overlapDuration);
+            } else {
+                audio.manager.stopMusic();
+            }
+        }
+        updateMenuVisibility();
+    }
+    if (gameState.currentState === 'running') {
+        if (event.key.toLowerCase() === 'a') {
+            keysPressed.autofire = !keysPressed.autofire;
+        }
+
+
+
+        if (event.key.toLowerCase() === 'b') {
+            keysPressed.bomb = true
+        }
+
+
+
+        if (event.key.toLocaleLowerCase() === 'f') {
+            keysPressed.fire = true
+        }
+
+
+        if (event.key === 'ArrowLeft') {
+            keysPressed.left = true;
+
+        }
+
+        if (event.key === 'ArrowRight') {
+            keysPressed.right = true;
+
+        }
+
+        if (event.key === 'ArrowUp') {
+            keysPressed.up = true;
+        }
+
+
+        if (event.key === 'ArrowDown') {
+            keysPressed.down = true;
+        }
+
+        if (event.key === ' ' || event.code === 'Space') {
+            keysPressed.space = true
+        }
+    }
+    if (gameState.currentState === 'cinematic') {
+
+        if (event.key === 'Escape') {
+            keysPressed.esc = true
+        }
+    }
+
+});
+
+document.addEventListener('keyup', (event) => {
+
+
+    if (event.key.toLocaleLowerCase() === 'f') {
+        keysPressed.fire = false
+    }
+
+    if (event.key === 'ArrowLeft') {
+        keysPressed.left = false;
+    }
+
+    if (event.key === 'Escape') {
+        keysPressed.esc = false
+    }
+
+    if (event.key === 'ArrowRight') {
+        keysPressed.right = false;
+    }
+
+    if (event.key === 'ArrowUp') {
+        keysPressed.up = false;
+    }
+
+    if (event.key === 'ArrowDown') {
+        keysPressed.down = false;
+    }
+
+    if (event.key.toLowerCase() === 'b') {
+        keysPressed.bomb = false;
+    }
+
+    if (event.key === ' ' || event.code === 'Space') {
+        keysPressed.space = false
+    }
+});
+
+
+let stop = false
+
+// The main game loop
+async function GameLoop() {
+    if (!stop) {
+        requestAnimationFrame(GameLoop);
+    }
+
+
+
+    if (gameState == undefined) {
+        return
+    }
+
+
+    if (gameState.currentState === 'running' && gameState.mapLoaded == false) {
+        console.log("loading game state")
+        document.getElementById('mario-img-cont').style.opacity = "100%"
+        document.getElementById('mario-healthBar-container').style.opacity = "100%"
+
+        // Clean this up?? it is checked above
+        if (gameState == undefined) {
+            gameState = createNewGameState()
+        }
+
+        if (gameState.mario == undefined) {
+            stop = true
+        }
+
+
+
+        gameState.mario.health = gameState.mario.maxHealth
+        // gameState.mario.x = 500
+        // gameState.mario.y = 500
+        utils.setUnit(gameState.mario, 500, 500);
+
+
+
+        gameState = createNewGameState(gameState)
+        gameState.currentState = 'running'
+        updateTimestamp = Date.now() + 8.3333
+
+
+        switch (gameState.level) {
+            case 1:
+
+                renderTileMap(stage1Map());
+                stage1(gameState.currentGameGen)
+                break;
+
+            case 2:
+                renderTileMap(stage2Map());
+                stage2(gameState.currentGameGen)
+                break;
+
+            case 3:
+                renderTileMap(stage3Map());
+                stage3(gameState.currentGameGen)
+                break;
+        }
+        gameState.mapLoaded = true
+    }
+
+
+    if (gameState.currentState === 'running') {
+
+        if (updateTimestamp == 0) {
+            updateTimestamp = Date.now() - 16.66666
+        }
+        let count = Math.min(10, Math.floor((Date.now() - updateTimestamp) / 16.66666))
+        
+        if (count == 10){
+            count = 1
+            updateTimestamp = Date.now()
+        }
+
+        console.log(count, "gap:", (Date.now() - updateTimestamp))
+        
+        const drift = 25-(Date.now() - updateTimestamp)
+        if (drift > 1){
+            updateTimestamp -= 0.2
+        }else if (drift < 1)(
+            updateTimestamp += 0.2
+        )
+
+        for (let i = 0; i < count; i++) {
+            update();
+        }
+        
+
+        
+        
+        
+
+    } else if (gameState.currentState == 'cinematic') {
+        if (updateTimestamp == 0) {
+            updateTimestamp = Date.now() - 16.66666
+        }
+        let count = Math.min(10, Math.floor((Date.now() - updateTimestamp) / 16.66666))
+
+        if (count == 10){
+            count = 1
+            updateTimestamp = Date.now()
+        }
+
+        for (let i = 0; i < count; i++) {
+            cinematicTicker()
+        }
+
+    }
+
+    if (gameState.currentState == 'running' || gameState.currentState == 'paused'){
+        draw();
+    }
+
+    for (let unit of queueFree) {
+        for (let group of gameState.allGroups) {
+            utils.removeUnitFromArray(unit, group)
+        }
+        unit.body.forEach(b => { if (b.div) b.div.remove(); })
+        if (unit.dom) unit.dom.remove();
+    }
+    queueFree.length = 0
+}
+
+let updateCounter = 0
+let updateCounterTimestamp = Date.now()
+let updatefpsMeter = 0
+let updateTimestamp = 0
+
+export function updateTimestampFunc() {
+    updateTimestamp += 16.66666
+}
+
+// Update the game state, only physics
+function update() {
+    updateTimestampFunc()
+
+    if (gameState.currentState === 'running') {
+        gameState.gameTime += 16.66666;
+    }
+
+    updateCounter++
+    if (updateCounter == 30) {
+        updateCounter = 0
+        updatefpsMeter = 1000 / ((Date.now() - updateCounterTimestamp) / 30)
+        updateCounterTimestamp = Date.now()
+    }
+
+
+    collision.powerUpPicked(gameState.mario) // checks if mario touched a health item//collision.isShot(mario);
+
+    //running all entities' update function
+    for (let entity of gameState.allEntities) {
+        if (gameState.aoeDamage.length > 0 && (entity.team == 'enemy' || entity.team == 'player') && Object.hasOwn(entity, 'health')) {
+            collision.inAoe(entity)
+        }
+
+        if (entity.updateFunc) entity.updateFunc(entity);
+
+        if (entity.type !== "powerUp") {
+            collision.isShot(entity)
+        }
+
+
+    }
+
+    gameState.frameCounter++
+
+
+    if (gameState.currentState === 'running') {
+        stageControllerTicker()
+    }
+
+}
+
+let drawCounter = 0
+let drawCounterTimestamp = Date.now()
+let drawfpsMeter = 0
+let thing = ' '
+
+// Draw the game, only updating visual elements based on their objects
+export function draw() {
+
+    if (thing == '.'){
+        thing = ','
+    }else{
+        thing = '.'
+    }
+
+    drawCounter++
+    if (drawCounter == 30) {
+        drawCounter = 0
+        drawfpsMeter = 1000 / ((Date.now() - drawCounterTimestamp) / 30)
+        drawCounterTimestamp = Date.now()
+    }
+
+
+
+    livesElement.textContent = `Lives: ${gameState.lives}`;
+    if (showDebug) {
+        timeCounterElement.textContent = `Time: ${utils.formatTime(gameState.gameTime)} drawFps: ${parseInt(drawfpsMeter)} simFps: ${parseInt(updatefpsMeter)} debug: allEntities:${gameState.allEntities.length}, debug-visuals:${document.getElementById('debug-visuals').childElementCount} ${thing}`;
+    } else {
+        timeCounterElement.textContent = `Time: ${utils.formatTime(gameState.gameTime)} ${thing}`;
+    }
+    livesElement.textContent = `Lives: ${gameState.lives}`;
+
+    let indicators = [];
+    if (gameState.mario.bombs > 0) {
+        indicators.push(`B: ${gameState.mario.bombs}`);
+    }
+
+    if (gameState.mario.multibulletTimer > 0) {
+        indicators.push("U");
+    }
+    powerupText.textContent = indicators.join(' | ');
+
+
+
+
+    for (let entity of gameState.allEntities) {
+
+        if (entity.drawFunc != undefined) {
+            entity.drawFunc()
+        }
+
+        //body debug visual update
+        for (const shape of entity.body) {
+            if (shape.active == false) {
+                shape.div.style.opacity = "20%"
+            } else {
+                shape.div.style.opacity = "100%"
+            }
+            // shape.div.style.left = shape.x + 'px';
+            // shape.div.style.bottom = shape.y + 'px';
+            shape.div.style.setProperty('--x', `${shape.x}px`);
+            shape.div.style.setProperty('--y', `${-shape.y}px`);
+            shape.div.bottom = 0
+            shape.div.left = 0
+
+        }
+
+
+
+    }
+
+}
+
+
+
+GameLoop();
+
+
+// Start the game
+function startStorymode(firstTime = false) {
+    gameState = createNewGameState()
+
+    if (firstTime) {
+        gameState.currentState = 'mainMenu'
+    }
+}
+
+
+
+function createNewGameState(oldState = undefined) {
+    let state = {
+        mario: oldState ? oldState.mario : {},
+        score: oldState ? oldState.score : 0,
+        lives: oldState ? oldState.lives : 5,
+        gameTime: oldState ? oldState.gameTime : 0,
+        level: oldState ? oldState.level : 1,
+
+        //non persisting
+        cinematicTimer: 0, //counter used by cinematicTicker to control the speed that cinematics play out
+        cinematicStep: 0,
+        currentState: 'cinematic', //'cinematic', 'mainMenu', 'paused', 'gameover', 'running'
+        previousState: '',
+        frameCounter: 0,
+        mapLoaded: false,
+        allEntities: [],
+        groundedEnemies: [],
+        aoeDamage: [],
+        allBullets: [],
+        cicadas: [],
+        cupids: [],
+        turtles: [],
+        powerUps: [],
+        walkables: [],
+        ghosts: [],
+        unicorns: [],
+        flowers: [],
+        tetros: [],
+        allGroups: [],
+        currentGameGen: parseInt(Math.random() * 100000),
+    }
+
+    state.allGroups = [state.allEntities, state.groundedEnemies, state.aoeDamage, state.allBullets, state.cicadas, state.cupids, state.turtles, state.powerUps, state.walkables, state.ghosts, state.unicorns, state.flowers, state.tetros]
+
+    if (oldState == undefined) {
+        state.mario = createMario(state.allEntities)
+    } else {
+        state.allEntities.push(state.mario)
+    }
+
+
+
+    return state
+}
+

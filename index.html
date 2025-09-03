@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>El Mario vs Space Invaders - Welcome!</title>
+   
+    <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+    <img class="banner-img" src="assets/backgrounds/banner.svg" alt="El Mario vs Space Invaders">
+    <div class="landing-container">
+      
+        <button id="play-game-btn">Play Game</button>
+    </div>
+
+    <!-- The Modal -->
+    <div id="game-modal">
+        <!-- This div will be scaled, containing both the game and the button -->
+        <div class="modal-scaler">
+            <span class="close-btn">&times;</span>
+            <div class="modal-content">
+                <iframe id="game-frame" src="game.html" frameborder="0"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script src="landing.js"></script>
+</body>
+</html>
